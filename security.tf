@@ -76,6 +76,15 @@ module "vault_security_group" {
       }
     },
     {
+  name      = "vault-cluster-communication"
+  direction = "inbound"
+  remote    = module.vault_security_group.security_group_id_for_ref
+  tcp = {
+    port_min = 8201
+    port_max = 8201
+  }
+},
+    {
       name      = "vault-api-from-lb"
       direction = "inbound"
       remote    = module.load_balancer_security_group.security_group_id

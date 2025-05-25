@@ -14,10 +14,10 @@ resource "ibm_is_lb" "vault_lb" {
 }
 
 # Load Balancer Listener (HTTPS)
-resource "ibm_is_lb_listener" "vault_https" {
+resource "ibm_is_lb_listener" "vault_tcp" {
   lb           = ibm_is_lb.vault_lb.id
-  port         = 443
-  protocol     = "https"
+  port         = 8200
+  protocol     = "tcp"
   default_pool = ibm_is_lb_pool.vault_pool.id
 
   # You would need to provide an SSL certificate
@@ -29,11 +29,11 @@ resource "ibm_is_lb_pool" "vault_pool" {
   name                = "vault-pool"
   lb                  = ibm_is_lb.vault_lb.id
   algorithm           = "round_robin"
-  protocol            = "http"
+  protocol            = "tcp"
   health_delay        = 60
   health_retries      = 5
   health_timeout      = 30
-  health_type         = "http"
+  health_type         = "tcp"
   health_monitor_url  = "/v1/sys/health"
   health_monitor_port = 8200
 }
