@@ -1,0 +1,213 @@
+# HashiCorp Vault on IBM Cloud - mise task runner configuration
+# Run with: mise run <task-name>
+
+[tasks.init]
+description = "Initialize Terraform"
+run = "terraform init"
+
+[tasks.validate]
+description = "Validate Terraform configuration"
+depends = ["init"]
+run = [
+    "terraform validate",
+    "terraform fmt -check=true"
+]
+
+[tasks.plan]
+description = "Plan Terraform deployment"
+depends = ["validate"]
+run = "terraform plan -out=tfplan"
+
+[tasks.apply]
+description = "Apply Terraform deployment"
+depends = ["plan"]
+run = [
+    "terraform apply tfplan",
+    "echo ''",
+    "echo 'Deployment complete! Next steps:'",
+    "echo '1. SSH to bastion: mise run ssh-bastion'",
+    "echo '2. Initialize Vault: mise run vault-init'",
+    "echo '3. Unseal Vault nodes: mise run vault-unseal'"
+]
+
+[tasks.destroy]
+description = "Destroy all resources"
+run = [
+    "echo '⚠️  This will destroy ALL resources. Continue? [y/N]'",
+    "read confirm && [ \"$confirm\" = \"y\" ] || [ \"$confirm\" = \"Y\" ] && terraform destroy -auto-approve || echo '❌ Destruction cancelled'"
+]
+
+[tasks.status]
+description = "Show deployment status"
+run = '''
+echo "Deployment Status:"
+echo "=================="
+terraform output -json | jq -r '
+    "Load Balancer: " + .load_balancer_hostname.value,
+    "Bastion IP: " + .bastion_ip.value,
+    "Vault IPs: " + (.vault_server_private_ips.value | to_entries | map(.key + ": " + .value) | join(", "))
+'
+'''
+
+[tasks.info]
+description = "Show deployment information and useful URLs"
+run = '''
+echo "📋 Deployment Information:"
+echo "========================="
+terraform output -json 2>/dev/null | jq -r '
+    "🌐 Vault UI: http://" + .load_balancer_hostname.value + ":8200/ui",
+    "🔗 Load Balancer: " + .load_balancer_hostname.value + ":8200",
+    "🖥️  Bastion Host: " + .bastion_ip.value,
+    "🏗️  VPC ID: " + .vpc_id.value
+' || echo "❌ No deployment found. Run 'mise run apply' first."
+echo ""
+echo "📚 Quick Commands:"
+echo "  mise run ssh-bastion    - SSH to bastion host"
+echo "  mise run vault-status   - Check Vault cluster"
+echo "  mise run vault-ui       - Open Vault web interface"
+'''
+
+[tasks.ssh-bastion]
+description = "SSH to bastion host"
+run = '''
+BASTION_IP=$(terraform output -raw bastion_ip 2>/dev/null || echo "")
+if [ -z "$BASTION_IP" ]; then
+    echo "❌ Cannot get bastion IP. Run 'mise run apply' first."
+    exit 1
+fi
+echo "🔑 Connecting to bastion host at $BASTION_IP"
+ssh -o StrictHostKeyChecking=no ubuntu@$BASTION_IP
+'''
+
+[tasks.ssh-vault]
+description = "SSH to vault server (set VAULT_NODE=1,2,3)"
+run = '''
+if [ -z "$VAULT_NODE" ]; then
+    echo "❌ Please specify VAULT_NODE=1,2, or 3"
+    echo "Example: VAULT_NODE=1 mise run ssh-vault"
+    exit 1
+fi
+BASTION_IP=$(terraform output -raw bastion_ip 2>/dev/null || echo "")
+VAULT_IP=$(terraform output -json vault_server_private_ips 2>/dev/null | jq -r ".zone_$VAULT_NODE" || echo "")
+if [ -z "$BASTION_IP" ] || [ -z "$VAULT_IP" ]; then
+    echo "❌ Cannot get server IPs. Run 'mise run apply' first."
+    exit 1
+fi
+echo "🔑 Connecting to Vault node $VAULT_NODE at $VAULT_IP via bastion $BASTION_IP"
+ssh -o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p ubuntu@$BASTION_IP" ubuntu@$VAULT_IP
+'''
+
+[tasks.vault-status]
+description = "Check Vault cluster status across all nodes"
+run = '''
+echo "🔍 Checking Vault cluster status..."
+BASTION_IP=$(terraform output -raw bastion_ip 2>/dev/null || echo "")
+if [ -z "$BASTION_IP" ]; then
+    echo "❌ Cannot get bastion IP. Run 'mise run apply' first."
+    exit 1
+fi
+terraform output -json vault_server_private_ips | jq -r 'to_entries[] | .key + ":" + .value' | while IFS=: read zone ip; do
+    echo ""
+    echo "📊 Vault Status - $zone ($ip):"
+    echo "================================"
+    ssh -o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p ubuntu@$BASTION_IP" ubuntu@$ip \
+        "sudo /usr/local/bin/vault-status.sh" 2>/dev/null || echo "❌ Failed to connect to $zone"
+done
+'''
+
+[tasks.vault-init]
+description = "Initialize Vault cluster (run on first node only)"
+run = '''
+echo "🔐 Initializing Vault cluster..."
+BASTION_IP=$(terraform output -raw bastion_ip 2>/dev/null || echo "")
+FIRST_VAULT_IP=$(terraform output -json vault_server_private_ips 2>/dev/null | jq -r ".zone_1" || echo "")
+if [ -z "$BASTION_IP" ] || [ -z "$FIRST_VAULT_IP" ]; then
+    echo "❌ Cannot get server IPs. Run 'mise run apply' first."
+    exit 1
+fi
+echo "🔑 Initializing Vault on first node ($FIRST_VAULT_IP)..."
+ssh -o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p ubuntu@$BASTION_IP" ubuntu@$FIRST_VAULT_IP \
+    "sudo /usr/local/bin/vault-init.sh init"
+echo ""
+echo "⚠️  IMPORTANT: Save the unseal keys securely!"
+echo "💡 Next step: Run 'mise run vault-unseal' on all nodes"
+'''
+
+[tasks.vault-unseal]
+description = "Unseal Vault cluster (interactive - will prompt for keys)"
+run = '''
+echo "🔓 Unsealing Vault cluster..."
+echo "⚠️  You will need to provide 3 unseal keys for each node"
+BASTION_IP=$(terraform output -raw bastion_ip 2>/dev/null || echo "")
+if [ -z "$BASTION_IP" ]; then
+    echo "❌ Cannot get bastion IP. Run 'mise run apply' first."
+    exit 1
+fi
+terraform output -json vault_server_private_ips | jq -r 'to_entries[] | .key + ":" + .value' | while IFS=: read zone ip; do
+    echo ""
+    echo "🔓 Unsealing Vault - $zone ($ip):"
+    echo "==================================="
+    ssh -t -o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p ubuntu@$BASTION_IP" ubuntu@$ip \
+        "sudo /usr/local/bin/vault-init.sh unseal"
+done
+'''
+
+[tasks.vault-ui]
+description = "Open Vault UI in browser"
+run = '''
+LB_HOSTNAME=$(terraform output -raw load_balancer_hostname 2>/dev/null || echo "")
+if [ -z "$LB_HOSTNAME" ]; then
+    echo "❌ Cannot get load balancer hostname. Run 'mise run apply' first."
+    exit 1
+fi
+echo "🌐 Opening Vault UI at http://$LB_HOSTNAME:8200/ui"
+which open >/dev/null 2>&1 && open "http://$LB_HOSTNAME:8200/ui" || \
+which xdg-open >/dev/null 2>&1 && xdg-open "http://$LB_HOSTNAME:8200/ui" || \
+echo "Please open http://$LB_HOSTNAME:8200/ui in your browser"
+'''
+
+[tasks.clean]
+description = "Clean up temporary files"
+run = [
+    "echo '🧹 Cleaning up temporary files...'",
+    "rm -f tfplan",
+    "rm -f .terraform.lock.hcl", 
+    "rm -rf .terraform/",
+    "rm -f *.pem",
+    "rm -f terraform.tfstate.backup",
+    "echo '✅ Cleanup complete'"
+]
+
+[tasks.help]
+description = "Show available tasks"
+run = '''
+echo "HashiCorp Vault on IBM Cloud - Available Tasks:"
+echo ""
+echo "Infrastructure Management:"
+echo "  init          - Initialize Terraform"
+echo "  validate      - Validate Terraform configuration"
+echo "  plan          - Plan Terraform deployment"
+echo "  apply         - Apply Terraform changes"
+echo "  destroy       - Destroy all resources"
+echo "  status        - Show deployment status"
+echo ""
+echo "Vault Operations:"
+echo "  vault-status  - Check Vault cluster status"
+echo "  vault-init    - Initialize Vault cluster"
+echo "  vault-unseal  - Unseal Vault nodes"
+echo "  vault-ui      - Open Vault web interface"
+echo ""
+echo "Access:"
+echo "  ssh-bastion   - SSH to bastion host"
+echo "  ssh-vault     - SSH to vault server (set VAULT_NODE=1,2,3)"
+echo ""
+echo "Utilities:"
+echo "  info          - Show deployment info and URLs"
+echo "  clean         - Clean up temporary files"
+echo "  help          - Show this help message"
+echo ""
+echo "Examples:"
+echo "  mise run apply"
+echo "  VAULT_NODE=1 mise run ssh-vault"
+echo "  mise run vault-status"
+'''

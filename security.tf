@@ -7,9 +7,18 @@ module "dmz_security_group" {
   security_group_name          = "${local.prefix}-dmz-sg"
   security_group_rules = [
     {
-      name      = "remote-ssh-inbound"
+      name      = "remote-ssh-inbound-1"
       direction = "inbound"
-      remote    = var.ssh_allowed_ips
+      remote    = var.ssh_allowed_ips[0]
+      tcp = {
+        port_min = 22
+        port_max = 22
+      }
+    },
+    {
+      name      = "remote-ssh-inbound-2"
+      direction = "inbound"
+      remote    = var.ssh_allowed_ips[1]
       tcp = {
         port_min = 22
         port_max = 22
@@ -76,14 +85,14 @@ module "vault_security_group" {
       }
     },
     {
-  name      = "vault-cluster-communication"
-  direction = "inbound"
-  remote    = module.vault_security_group.security_group_id_for_ref
-  tcp = {
-    port_min = 8201
-    port_max = 8201
-  }
-},
+      name      = "vault-cluster-communication"
+      direction = "inbound"
+      remote    = module.vault_security_group.security_group_id_for_ref
+      tcp = {
+        port_min = 8201
+        port_max = 8201
+      }
+    },
     {
       name      = "vault-api-from-lb"
       direction = "inbound"

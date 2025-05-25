@@ -52,7 +52,7 @@ module "bastion" {
   security_group_id = module.dmz_security_group.security_group_id
   zone              = local.vpc_zones[0].zone
   user_data         = file("${path.module}/init.yaml")
-  ssh_key_ids       = [data.ibm_is_ssh_key.sshkey.id]
+  ssh_key_ids       = local.ssh_key_ids
   tags              = local.tags
 }
 
@@ -72,7 +72,7 @@ module "vault_servers" {
   subnet_id         = ibm_is_subnet.vault[count.index].id
   security_group_id = module.vault_security_group.security_group_id
   zone              = local.vpc_zones[count.index].zone
-  ssh_key_ids       = [data.ibm_is_ssh_key.sshkey.id]
-  user_data         = file("${path.module}/vault-userdata.sh")
+  ssh_key_ids       = local.ssh_key_ids
+  user_data         = file("${path.module}/vault_userdata_script.sh")
   tags              = local.tags
 }

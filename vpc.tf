@@ -1,6 +1,6 @@
 resource "ibm_is_vpc" "vpc" {
   name                        = "${local.prefix}-vpc"
-  resource_group              = var.resource_group_id
+  resource_group              = module.resource_group.resource_group_id
   address_prefix_management   = var.default_address_prefix
   default_network_acl_name    = "${local.prefix}-default-nacl"
   default_security_group_name = "${local.prefix}-default-sg"

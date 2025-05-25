@@ -5,6 +5,17 @@ variable "region" {
   default     = "us-south"
 }
 
+variable "ibmcloud_api_key" {
+  description = "IBM Cloud API key for authentication"
+  type        = string
+  sensitive   = true
+}
+
+variable "existing_resource_group" {
+  description = "Name of an existing resource group to use. If not set, a new resource group will be created."
+  type        = string
+  default     = ""
+}
 
 variable "vault_instance_profile" {
   description = "Instance profile for Vault servers"

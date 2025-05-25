@@ -1,0 +1,31 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+packages:
+  - python3-pip
+  - build-essential
+  - unzip
+  - jq
+  - git
+  - software-properties-common
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - wget
+snap:
+    commands:
+      00: snap install yq
+
+# Schedule reboot 3 minutes after cloud-init finishes
+power_state:
+  mode: reboot
+  message: "Rebooting system after initial setup"
+  timeout: 60
+  condition: True
+
+# Add a message to system logs for verification
+runcmd:
+  - echo "System will reboot in 1 minute after cloud-init completes" | tee -a /var/log/syslog
+
+final_message: "The system is finally up, after $UPTIME seconds"
+output: {all: '| tee -a /var/log/cloud-init-output.log'}

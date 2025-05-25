@@ -5,7 +5,7 @@ variable "instance_profile" {
   default     = "cx3d-4x10"
 }
 
-variable "image_name" {
+variable "base_image" {
   description = "The name of the image to use for the compute hosts."
   type        = string
   default     = "ibm-ubuntu-24-04-2-minimal-amd64-1"
